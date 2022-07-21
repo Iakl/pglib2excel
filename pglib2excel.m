@@ -1,36 +1,132 @@
-% load patients.mat
-% T = table(LastName,Age,Weight,Smoker);
-% T(1:5,:)
-% filename = 'patientdata.xlsx';
-% writetable(T,filename,'Sheet',1,'Range','D1')
-% writetable(T,filename,'Sheet','MyNewSheet','WriteVariableNames',false);
-
-% A = magic(5)
-% C = {'Time', 'Temp'; 12 98; 13 'x'; 14 97}
-% filename = 'testdata.xlsx';
-% writematrix(A,filename,'Sheet',1,'Range','E1:I5')
-% writecell(C,filename,'Sheet','Temperatures','Range','B2');
-
 clear;
 clc;
 
 mpc = pglib_opf_case14_ieee;
 
-filename = 'case.xlsx';
+filename = 'pglib_opf_case14_ieee.xlsx';
 
+err = 0;
+
+%% Scenario base configuration 
+config_headers = {'phor', 'pdur', 'sn', 'mode', 'forecast_length_h'};
+phor = 1; % By default, 1 hour of planning horizon
+pdur = 60; % By default, 60 minutes of period duration
+sn = mpc.baseMVA; % Base MVA for all system
+if ~all(mpc.gen(:,7) == sn)
+    fprintf('WARNING, DIFFERENT BASE MVA DEFINED IN SCENARIO FOR GENERATORS, USING BASE %i MVA\n', sn)
+end
+mode = 'once'; % By default only solves planning horizon once
+forecast_length_h = 24; % By default, forecast length is 24 hours (not useful when phor = 1)
+config_data = {phor, pdur, sn, mode, forecast_length_h};
+
+%% Bus data creation
 bus_headers = {'index', 'name', 'slack', 'vn_kv', 'v_pu_min', 'v_pu_max'};
-writecell(bus_headers,filename,'Sheet','Bus');
-
 bus_i = mpc.bus(:,1) - 1;
 bus_name = "bus" + bus_i;
-bus_slack = zeros(height(mpc.bus), 1);
-bus_slack(1)=1;
+bus_slack = zeros(height(mpc.bus), 1) + (mpc.bus(:, 2) == 3);
+% pglib bus data structure:
+%	1bus_i	2type	3Pd	4Qd	5Gs	6Bs	7area	8Vm	9Va	10baseKV	11zone	12Vmax	13Vmin
 bus_data = [bus_i bus_name bus_slack mpc.bus(:,[10 13 12])];
 
-%	1bus_i	2type	3Pd	4Qd	5Gs	6Bs	7area	8Vm	9Va	10baseKV	11zone	12Vmax	13Vmin
-writematrix(bus_data,filename,'Sheet','Bus','Range','A2');
+%% Generators data creation
+gen_headers = {'index', 'name', 'bus', 'p_mw', 'q_mvar', 'p_min', 'p_max', 'q_min', 'q_max', 'is_active', 'v_set', 'c_alpha', 'c_betha', 'controllable', 'priority', 's_max_mode', 'd_max_mw'};
+gen_i = (0:(height(mpc.gen) - 1)).';
+gen_name = "gen" + gen_i;
+gen_bus = mpc.gen(:,1) - 1;
+if ~all(mpc.gencost(:, 1) == 2)
+    fprintf('ERROR, PIECEWISE COST MODEL DEFINED. THIS WORKS ONLY FOR POLYNOMIALS\n')
+    err = 1;
+elseif ~all(mpc.gencost(:, 4) <= 3)
+    fprintf('ERROR, POLYNOMIALS COSTS MUST BE OF ORDER 2 OR LESS\n')
+    err = 1;
+else
+    c_2 = 0;
+    c_1 = 0;
+    c_0 = 0;
+    if any(mpc.gencost(:, 4) == 3)
+        c_2 = (mpc.gencost(:, 4) == 3).*mpc.gencost(:, 5);
+        c_1 = (mpc.gencost(:, 4) == 3).*mpc.gencost(:, 6); 
+        c_0 = (mpc.gencost(:, 4) == 3).*mpc.gencost(:, 7); 
+    end
+    if any(mpc.gencost(:, 4) == 2)
+        c_1 = c_1 + (mpc.gencost(:, 4) == 2).*mpc.gencost(:, 5);
+        c_0 = c_0 + (mpc.gencost(:, 4) == 2).*mpc.gencost(:, 6); 
+    end
+    if any(mpc.gencost(:, 4) == 1)
+        c_0 = c_0 + (mpc.gencost(:, 4) == 1).*mpc.gencost(:, 5);
+    end
+    if any(c_0)
+        fprintf('WARNING, FIXED GENERATOR COST NOT IMPLEMENTED YET\n')
+    end        
+end
+if ~all(mpc.gencost(:, 2)) == 0
+    fprintf('ERROR, STARTUP COST DIFFERENT FROM 0. THIS WORKS ONLY FOR 0 STARTUP COST\n')
+    err = 1;
+end    
+if ~all(mpc.gencost(:, 3)) == 0
+    fprintf('ERROR, SHUTDOWN COST DIFFERENT FROM 0. THIS WORKS ONLY FOR 0 SHUTDOWN COST\n')
+    err = 1;
+end
+v_set = zeros(height(mpc.gen), 1); % By default generators doesnt fix voltage magnitude (assumes opf.use_vg = 0 in matpower)
+controllable = ones(height(mpc.gen), 1); % By default all generators are controllable
+priority = ones(height(mpc.gen), 1); % By default all generators have priority 1
+s_max_mode = "fixed" + strings(height(mpc.gen), 1); % By default all generators use fixed maximum
+d_max_mw = ones(height(mpc.gen), 1) * max(mpc.gen(:,9))*10; % By default ramps are not constraints
+% pglib gen data structure:
+%	1bus	2Pg	3Qg	4Qmax	5Qmin	6Vg	7mBase	8status	9Pmax	10Pmin
+gen_data = [gen_i gen_name gen_bus mpc.gen(:,[2 3 10 9 5 4 8]) v_set c_2 c_1 controllable priority s_max_mode d_max_mw];
+
+%% Loads data creation
+load_headers = {'index', 'name', 'bus', 'is_active', 'p_mw', 'q_mvar', 's_mode'};
+load_i = (0:(sum(mpc.bus(:, 3) ~= 0) - 1)).';
+load_name = "lcrit" + load_i;
+load_bus = ((mpc.bus(:, 3) ~= 0).*mpc.bus(:, 1));
+load_bus(load_bus == 0) = [];
+load_bus = load_bus -1;
+if any((mpc.bus(:, 3) ~= 0) - (mpc.bus(:, 4) ~= 0))
+    fprintf('ERROR, P OR Q NOT SIMULTANEOUSLY 0. NOT IMPLEMENTED YET\n')
+    err = 1;
+end
+is_active = ones(height(load_i), 1); % By default all loads are active
+p_mw = -mpc.bus(:, 3);
+p_mw(p_mw == 0) = [];
+q_mvar = -mpc.bus(:, 4);
+q_mvar(q_mvar == 0) = [];
+s_mode = "fixed" + strings(height(load_i), 1); % By default all loads use fixed demand
+load_data = [load_i load_name load_bus is_active p_mw q_mvar s_mode];
+
+%% Branchs data creation
+line_headers = {'index', 'name', 'from_bus', 'to_bus', 'is_active', 'p_max', 'r_pu', 'x_pu', 'b_pu', 'ang_min', 'ang_max'};
+line_i = (0:(height(mpc.branch) - 1)).';
+line_name = "line" + line_i;
+from_bus = mpc.branch(:,1) - 1;
+to_bus = mpc.branch(:,2) - 1;
+% pglib branch data structure
+%	1fbus	2tbus	3r	4x	5b	6rateA	7rateB	8rateC	9ratio	10angle	11status	12angmin	13angmax
+line_data = [line_i line_name from_bus to_bus mpc.branch(:,[11 6 3 4 5 12 13])];
 
 
+%% Excel creation 
+if err == 0
+    writecell(config_headers,filename,'Sheet','config');
+    writecell(config_data,filename,'Sheet','config','Range','A2');
+    
+    writecell(bus_headers,filename,'Sheet','Bus');
+    writematrix(bus_data,filename,'Sheet','Bus','Range','A2');
+    
+    writecell(line_headers,filename,'Sheet','Lines');
+    writematrix(line_data,filename,'Sheet','Lines','Range','A2');
+    
+    writecell(gen_headers,filename,'Sheet','Generators');
+    writematrix(gen_data,filename,'Sheet','Generators','Range','A2');
+    
+    writecell(load_headers,filename,'Sheet','Load_Crit');
+    writematrix(load_data,filename,'Sheet','Load_Crit','Range','A2');
+    
+    fprintf('EXCEL CREATED SUCCESSFULY\n')
+else
+    fprintf('EXCEL NOT CREATED\n')
+end
 
 
 
