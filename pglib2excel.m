@@ -11,14 +11,24 @@
 % writematrix(A,filename,'Sheet',1,'Range','E1:I5')
 % writecell(C,filename,'Sheet','Temperatures','Range','B2');
 
-mpc = loadcase('case30');
+clear;
+clc;
+
+mpc = pglib_opf_case14_ieee;
+
 filename = 'case.xlsx';
 
-bus_headers = {'index',	'name', 'vn_kv', 'slack', 'v_pu_min', 'v_pu_max'};
+bus_headers = {'index', 'name', 'slack', 'vn_kv', 'v_pu_min', 'v_pu_max'};
 writecell(bus_headers,filename,'Sheet','Bus');
 
-%	bus_i	type	Pd	Qd	Gs	Bs	area	Vm	Va	baseKV	zone	Vmax	Vmin
-writematrix(mpc.bus(:,[1 10 13 12]),filename,'Sheet','Bus','Range','A2');
+bus_i = mpc.bus(:,1) - 1;
+bus_name = "bus" + bus_i;
+bus_slack = zeros(height(mpc.bus), 1);
+bus_slack(1)=1;
+bus_data = [bus_i bus_name bus_slack mpc.bus(:,[10 13 12])];
+
+%	1bus_i	2type	3Pd	4Qd	5Gs	6Bs	7area	8Vm	9Va	10baseKV	11zone	12Vmax	13Vmin
+writematrix(bus_data,filename,'Sheet','Bus','Range','A2');
 
 
 
