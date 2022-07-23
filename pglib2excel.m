@@ -1,9 +1,13 @@
 clear;
 clc;
 
-mpc = pglib_opf_case14_ieee;
+scenario = 'pglib_opf_case14_ieee';
+dir = append('../pglib2excel/scenarios/',scenario);
+mkdir(dir);
+mpc_func = str2func(scenario);
+mpc = mpc_func();
 
-filename = 'pglib_opf_case14_ieee.xlsx';
+filename = append(dir, '/params.xlsx');
 
 err = 0;
 
@@ -123,11 +127,10 @@ if err == 0
     writecell(load_headers,filename,'Sheet','Load_Crit');
     writematrix(load_data,filename,'Sheet','Load_Crit','Range','A2');
     
-    fprintf('EXCEL CREATED SUCCESSFULY\n')
+    fprintf('EXCEL FILE %s SUCCESSFULY CREATED\n', filename)
 else
     fprintf('EXCEL NOT CREATED\n')
 end
-
 
 
 
