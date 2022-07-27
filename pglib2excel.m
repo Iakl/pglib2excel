@@ -24,17 +24,19 @@ forecast_length_h = 24; % By default, forecast length is 24 hours (not useful wh
 config_data = {phor, pdur, sn, mode, forecast_length_h};
 
 %% Bus data creation
-bus_headers = {'index', 'name', 'slack', 'vn_kv', 'v_pu_min', 'v_pu_max'};
+bus_headers = {'index', 'name', 'slack', 'vn_kv', 'gs_mw', 'bs_mvar', 'v_pu_min', 'v_pu_max'};
 bus_i = mpc.bus(:,1) - 1;
 bus_name = "bus" + bus_i;
 bus_slack = zeros(height(mpc.bus), 1) + (mpc.bus(:, 2) == 3);
 bus_vn_kv = contains(mpc.bus_name,'HV')*135 + contains(mpc.bus_name,'LV')*0.208 + contains(mpc.bus_name,'ZV')*14 + contains(mpc.bus_name,'TV')*12;
+gs_mw = -mpc.bus(:,5);
+bs_mvar = -mpc.bus(:,6);
 % pglib bus data structure:
 %	1bus_i	2type	3Pd	4Qd	5Gs	6Bs	7area	8Vm	9Va	10baseKV	11zone	12Vmax	13Vmin
-bus_data = [bus_i bus_name bus_slack bus_vn_kv mpc.bus(:,[13 12])];
+bus_data = [bus_i bus_name bus_slack bus_vn_kv gs_mw bs_mvar mpc.bus(:,[13 12])];
 
 %% Generators data creation
-gen_headers = {'index', 'name', 'bus', 'p_mw', 'q_mvar', 'p_min', 'p_max', 'q_min', 'q_max', 'is_active', 'v_set', 'c_alpha', 'c_betha', 'controllable', 'priority', 's_max_mode', 'd_max_mw'};
+gen_headers = {'index', 'name', 'bus', 'p_mw', 'q_mvar', 'p_min', 'p_max', 'q_min', 'q_max', 'is_active', 'v_set', 'c2', 'c1', 'controllable', 'priority', 's_max_mode', 'd_max_mw'};
 gen_i = (0:(height(mpc.gen) - 1)).';
 gen_name = "gen" + gen_i;
 gen_bus = mpc.gen(:,1) - 1;
@@ -106,14 +108,15 @@ s_mode = "fixed" + strings(height(load_i), 1); % By default all loads use fixed 
 load_data = [load_i load_name load_bus is_active p_mw q_mvar s_mode];
 
 %% Branchs data creation
-line_headers = {'index', 'name', 'from_bus', 'to_bus', 'is_active', 'p_max', 'r_pu', 'x_pu', 'b_sh_pu', 'ang_min', 'ang_max'};
+line_headers = {'index', 'name', 'from_bus', 'to_bus', 'p_max', 'is_active', 'r_pu', 'x_pu', 'b_sh_pu', 'ang_min', 'ang_max'};
 line_i = (0:(height(mpc.branch) - 1)).';
 line_name = "line" + line_i;
 from_bus = mpc.branch(:,1) - 1;
 to_bus = mpc.branch(:,2) - 1;
+p_max = mpc.branch(:,6) + (mpc.branch(:,6)==0)*1000;
 % pglib branch data structure
 %	1fbus	2tbus	3r	4x	5b	6rateA	7rateB	8rateC	9ratio	10angle	11status	12angmin	13angmax
-line_data = [line_i line_name from_bus to_bus mpc.branch(:,[11 6 3 4 5 12 13])];
+line_data = [line_i line_name from_bus to_bus p_max mpc.branch(:,[11 3 4 5 12 13])];
 
 
 %% Excel creation 
