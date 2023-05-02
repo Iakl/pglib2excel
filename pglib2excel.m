@@ -1,7 +1,7 @@
 clear;
 clc;
 
-scenario = 'case118';
+scenario = 'case30';
 dir = append('scenarios/',scenario);
 mkdir(dir);
 mpc_func = str2func(scenario);
@@ -119,7 +119,7 @@ q_mvar_max = zeros(height(load_i), 1); % By default 0
 q_mvar_min = zeros(height(load_i), 1); % By default 0
 flex_price = zeros(height(load_i), 1); % By default 0
 flex_price_mode = "fixed" + strings(height(load_i), 1); % By default fixed
-load_data = [load_i load_bus load_type is_active controllable priority p_mw q_mvar s_mode p_mw_max p_mw_min q_mvar_max q_mvar_min	flex_price flex_price_mode];
+load_data = [load_i load_bus load_type is_active controllable priority -p_mw -q_mvar s_mode -p_mw_max -p_mw_min -q_mvar_max -q_mvar_min	flex_price flex_price_mode];
 
 %% Branchs data creation
 line_headers = {'index', 'from_bus', 'to_bus', 's_mva_max', 'is_active', 'r_pu', 'x_pu', 'b_sh_pu', 'ang_grad_min', 'ang_grad_max', 'overload_pu'};
