@@ -1,7 +1,7 @@
 clear;
 clc;
 
-scenario = 'case30';
+scenario = 'case5';
 dir = append('scenarios/',scenario);
 mkdir(dir);
 mpc_func = str2func(scenario);
@@ -38,7 +38,7 @@ bs_mvar = zeros(height(mpc.bus), 1);
 bus_data = [bus_i bus_slack mpc.bus(:,[GS BS BASE_KV VMIN VMAX])];
 
 %% Generators data creation
-gen_headers = {'index', 'bus', 'p_mw_ini', 'p_mw', 'q_mvar', 'p_mw_min', 'p_mw_max', 'q_mvar_min', 'q_mvar_max', 'is_active', 'v_pu_set', 'c2', 'c1', 'controllable', 'priority', 's_max_mode', 'd_mw_max'};
+gen_headers = {'index', 'bus', 'p_mw_ini', 'p_mw', 'q_mvar', 'p_mw_min', 'p_mw_max', 'q_mvar_min', 'q_mvar_max', 'is_active', 'v_pu_set', 'c2', 'c1', 'price_mode', 'controllable', 'priority', 's_max_mode', 'd_mw_max'};
 gen_i = (0:(height(mpc.gen) - 1)).';
 % gen_name = "gen" + gen_i;
 gen_bus = mpc.gen(:, GEN_BUS) - 1;
@@ -86,16 +86,17 @@ if height(slack_i) > 1
 end
 p_mw_ini = zeros(height(mpc.gen), 1); % All generators start at P = 0 by default
 v_set = zeros(height(mpc.gen), 1) + (mpc.gen(:, GEN_BUS)==slack_i).*mpc.gen(:,VG); % By default generators doesnt fix voltage magnitude (assumes opf.use_vg = 0 in matpower)
+price_mode = "fixed" + strings(height(mpc.gen), 1); % By default all generators use fixed costs
 controllable = ones(height(mpc.gen), 1); % By default all generators are controllable
 priority = ones(height(mpc.gen), 1); % By default all generators have priority 1
 s_max_mode = "fixed" + strings(height(mpc.gen), 1); % By default all generators use fixed maximum
 d_mw_max = ones(height(mpc.gen), 1) * max(mpc.gen(:, PMAX))*10; % By default ramps are not constraints
 % pglib gen data structure:
 %	1bus	2Pg	3Qg	4Qmax	5Qmin	6Vg	7mBase	8status	9Pmax	10Pmin
-gen_data = [gen_i gen_bus p_mw_ini mpc.gen(:,[PG QG PMIN PMAX QMIN QMAX GEN_STATUS]) v_set c_2 c_1 controllable priority s_max_mode d_mw_max];
+gen_data = [gen_i gen_bus p_mw_ini mpc.gen(:,[PG QG PMIN PMAX QMIN QMAX GEN_STATUS]) v_set c_2 c_1 price_mode controllable priority s_max_mode d_mw_max];
 
 %% Loads data creation
-load_headers = {'index', 'bus', 'load_type', 'is_active', 'controllable', 'priority', 'p_mw', 'q_mvar', 's_mode', 'p_mw_max', 'p_mw_min', 'q_mvar_max', 'q_mvar_min', 'flex_price', 'flex_price_mode'};
+load_headers = {'index', 'bus', 'load_type', 'is_active', 'controllable', 'priority', 'p_mw', 'q_mvar', 's_mode', 'p_mw_max', 'p_mw_min', 'q_mvar_max', 'q_mvar_min', 'flex_price_down', 'flex_price_up', 'flex_price_mode'};
 %load_i = (0:(sum(mpc.bus(:, PD) ~= 0) - 1)).';
 load_i = (0:(sum(mpc.bus(:, PD) + mpc.bus(:, QD) ~= 0) - 1)).';
 % load_name = "lcrit" + load_i;
@@ -117,21 +118,28 @@ p_mw_max = zeros(height(load_i), 1); % By default 0
 p_mw_min = zeros(height(load_i), 1); % By default 0
 q_mvar_max = zeros(height(load_i), 1); % By default 0
 q_mvar_min = zeros(height(load_i), 1); % By default 0
-flex_price = zeros(height(load_i), 1); % By default 0
+flex_price_down = zeros(height(load_i), 1); % By default 0
+flex_price_up = zeros(height(load_i), 1); % By default 0
 flex_price_mode = "fixed" + strings(height(load_i), 1); % By default fixed
-load_data = [load_i load_bus load_type is_active controllable priority -p_mw -q_mvar s_mode -p_mw_max -p_mw_min -q_mvar_max -q_mvar_min	flex_price flex_price_mode];
+load_data = [load_i load_bus load_type is_active controllable priority -p_mw -q_mvar s_mode -p_mw_max -p_mw_min -q_mvar_max -q_mvar_min	flex_price_down flex_price_up flex_price_mode];
 
 %% Branchs data creation
-line_headers = {'index', 'from_bus', 'to_bus', 's_mva_max', 'is_active', 'r_pu', 'x_pu', 'b_sh_pu', 'ang_grad_min', 'ang_grad_max', 'overload_pu'};
+line_headers = {'index', 'from_bus', 'to_bus', 's_mva_max', 'is_active', 'r', 'x', 'g_sh', 'b_sh', 'ang_grad_min', 'ang_grad_max', 'overload_pu'};
 line_i = (0:(height(mpc.branch) - 1)).';
 % line_name = "line" + line_i;
 from_bus = mpc.branch(:, F_BUS) - 1;
 to_bus = mpc.branch(:, T_BUS) - 1;
 s_max = mpc.branch(:, RATE_A) + (mpc.branch(:, RATE_A)==0)*1000;
+v_kv = mpc.bus((from_bus + 1), BASE_KV);
+r = mpc.branch(:, BR_R).*v_kv.*v_kv/sn;
+x = mpc.branch(:, BR_X).*v_kv.*v_kv/sn;
+g_sh = line_i * 0;
+%g_sh = mpc.branch(:, BR_G).*v_kv.*v_kv/sn
+b_sh = mpc.branch(:, BR_B).*v_kv.*v_kv/sn;
 overload_pu = ones(height(line_i), 1)*0.8; % By default 0.8
 % pglib branch data structure
 %	1fbus	2tbus	3r	4x	5b	6rateA	7rateB	8rateC	9ratio	10angle	11status	12angmin	13angmax
-line_data = [line_i from_bus to_bus s_max mpc.branch(:,[BR_STATUS BR_R BR_X BR_B ANGMIN ANGMAX]) overload_pu];
+line_data = [line_i from_bus to_bus s_max mpc.branch(:,BR_STATUS) r x g_sh b_sh mpc.branch(:, [ANGMIN ANGMAX]) overload_pu];
 
 
 %% Excel creation 
