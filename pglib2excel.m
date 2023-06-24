@@ -1,7 +1,4 @@
-clear;
-clc;
-
-scenario = 'case5';
+function pglib2excel(scenario)
 dir = append('scenarios/',scenario);
 mkdir(dir);
 mpc_func = str2func(scenario);
@@ -12,7 +9,6 @@ filename = append(dir, '/params.xlsx');
 err = 0;
 
 define_constants;
-
 %% Scenario base configuration 
 config_headers = {'nper', 'pdur', 'sn_mva'};
 nper = 1; % By default, 1 period
@@ -24,24 +20,23 @@ end
 config_data = {nper, pdur, sn};
 
 %% Bus data creation
-bus_headers = {'index', 'slack', 'gs_mw', 'bs_mvar', 'vn_kv', 'v_pu_min', 'v_pu_max'};
-bus_i = mpc.bus(:,BUS_I) - 1;
-% bus_name = "bus" + bus_i;
+bus_headers = {'index', 'slack', 'gs_mw', 'bs_mvar', 'vn_kv', 'v_pu_min', 'v_pu_max', 'ang_grad_min', 'ang_grad_max'};
+% bus_i = mpc.bus(:,BUS_I) - 1;
+bus_i = (0:(height(mpc.bus) - 1)).';
+bus_name = mpc.bus(:,BUS_I);
 bus_slack = zeros(height(mpc.bus), 1) + (mpc.bus(:, BUS_TYPE) == 3);
-% bus_vn_kv = contains(mpc.bus_name,'HV')*135 + contains(mpc.bus_name,'LV')*0.208 + contains(mpc.bus_name,'ZV')*14 + contains(mpc.bus_name,'TV')*12;
-% gs_mw = -mpc.bus(:,5);
-% bs_mvar = -mpc.bus(:,6);
-gs_mw = zeros(height(mpc.bus), 1);
-bs_mvar = zeros(height(mpc.bus), 1);
+ang_grad_min = zeros(height(mpc.bus), 1) - 180; % By default -180
+ang_grad_max = zeros(height(mpc.bus), 1) + 180; % By default 180
 % pglib bus data structure:
 %	1bus_i	2type	3Pd	4Qd	5Gs	6Bs	7area	8Vm	9Va	10baseKV	11zone	12Vmax	13Vmin
-bus_data = [bus_i bus_slack mpc.bus(:,[GS BS BASE_KV VMIN VMAX])];
+bus_data = [bus_i bus_slack mpc.bus(:,[GS BS BASE_KV VMIN VMAX]) ang_grad_min ang_grad_max];
 
 %% Generators data creation
-gen_headers = {'index', 'bus', 'p_mw_ini', 'p_mw', 'q_mvar', 'p_mw_min', 'p_mw_max', 'q_mvar_min', 'q_mvar_max', 'is_active', 'v_pu_set', 'c2', 'c1', 'price_mode', 'controllable', 'priority', 's_max_mode', 'd_mw_max'};
+gen_headers = {'index', 'bus', 'p_mw_ini', 'p_mw', 'q_mvar', 'p_mw_min', 'p_mw_max', 'q_mvar_min', 'q_mvar_max', 'is_active', 'v_pu_set', 'p_c2', 'p_c1', 'q_c2', 'q_c1', 'price_mode', 'controllable', 'priority', 's_max_mode', 'd_mw_max'};
 gen_i = (0:(height(mpc.gen) - 1)).';
 % gen_name = "gen" + gen_i;
 gen_bus = mpc.gen(:, GEN_BUS) - 1;
+% gen_bus = find(ismember(bus_name, mpc.gen(:, GEN_BUS)));
 if ~all(mpc.gencost(:, MODEL) == 2)
     fprintf('ERROR, PIECEWISE COST MODEL DEFINED. THIS WORKS ONLY FOR POLYNOMIALS\n')
     err = 1;
@@ -49,25 +44,45 @@ elseif ~all(mpc.gencost(:, NCOST) <= 3)
     fprintf('ERROR, POLYNOMIALS COSTS MUST BE OF ORDER 2 OR LESS\n')
     err = 1;
 else
-    c_2 = 0;
-    c_1 = 0;
-    c_0 = 0;
-    if any(mpc.gencost(:, NCOST) == 3)
-        c_2 = (mpc.gencost(:, NCOST) == 3).*mpc.gencost(:, 5);
-        c_1 = (mpc.gencost(:, NCOST) == 3).*mpc.gencost(:, 6); 
-        c_0 = (mpc.gencost(:, NCOST) == 3).*mpc.gencost(:, 7); 
+    numgen = height(mpc.gen);
+    numcosts = height(mpc.gencost);
+    p_c2 = 0;
+    p_c1 = 0;
+    p_c0 = 0;
+    q_c2 = zeros(height(mpc.gen), 1);
+    q_c1 = zeros(height(mpc.gen), 1);
+    q_c0 = zeros(height(mpc.gen), 1);
+    if any(mpc.gencost(1:numgen, NCOST) == 3)
+        p_c2 = (mpc.gencost(1:numgen, NCOST) == 3).*mpc.gencost(1:numgen, 5);
+        p_c1 = (mpc.gencost(1:numgen, NCOST) == 3).*mpc.gencost(1:numgen, 6); 
+        p_c0 = (mpc.gencost(1:numgen, NCOST) == 3).*mpc.gencost(1:numgen, 7); 
+        if numcosts > numgen
+            q_c2 = (mpc.gencost((numgen+1):numcosts, NCOST) == 3).*mpc.gencost((numgen+1):numcosts, 5);
+            q_c1 = (mpc.gencost((numgen+1):numcosts, NCOST) == 3).*mpc.gencost((numgen+1):numcosts, 6); 
+            q_c0 = (mpc.gencost((numgen+1):numcosts, NCOST) == 3).*mpc.gencost((numgen+1):numcosts, 7);
+        end
     end
-    if any(mpc.gencost(:, NCOST) == 2)
-        c_2 = c_2 * mpc.gencost(:, 5);
-        c_1 = c_1 + (mpc.gencost(:, NCOST) == 2).*mpc.gencost(:, 5);
-        c_0 = c_0 + (mpc.gencost(:, NCOST) == 2).*mpc.gencost(:, 6); 
+    if any(mpc.gencost(1:numgen, NCOST) == 2)
+        p_c2 = p_c2 * mpc.gencost(1:numgen, 5);
+        p_c1 = p_c1 + (mpc.gencost(1:numgen, NCOST) == 2).*mpc.gencost(1:numgen, 5);
+        p_c0 = p_c0 + (mpc.gencost(1:numgen, NCOST) == 2).*mpc.gencost(1:numgen, 6); 
+        if numcosts > numgen
+            q_c2 = q_c2 * mpc.gencost((numgen+1):numcosts, 5);
+            q_c1 = q_c1 + (mpc.gencost((numgen+1):numcosts, NCOST) == 2).*mpc.gencost((numgen+1):numcosts, 5);
+            q_c0 = q_c0 + (mpc.gencost((numgen+1):numcosts, NCOST) == 2).*mpc.gencost((numgen+1):numcosts, 6);
+        end
     end
-    if any(mpc.gencost(:, NCOST) == 1)
-        c_2 = c_2 * mpc.gencost(:, 5);
-        c_1 = c_1 * mpc.gencost(:, 5);
-        c_0 = c_0 + (mpc.gencost(:, NCOST) == 1).*mpc.gencost(:, 5);
+    if any(mpc.gencost(1:numgen, NCOST) == 1)
+        p_c2 = p_c2 * mpc.gencost(1:numgen, 5);
+        p_c1 = p_c1 * mpc.gencost(1:numgen, 5);
+        p_c0 = p_c0 + (mpc.gencost(1:numgen, NCOST) == 1).*mpc.gencost(1:numgen, 5);
+        if numcosts > numgen
+            q_c2 = q_c2 * mpc.gencost((numgen+1):numcosts, 5);
+            q_c1 = q_c1 * mpc.gencost((numgen+1):numcosts, 5);
+            q_c0 = q_c0 + (mpc.gencost((numgen+1):numcosts, NCOST) == 1).*mpc.gencost((numgen+1):numcosts, 5);
+        end
     end
-    if any(c_0)
+    if any(p_c0)  || any(q_c0)
         fprintf('WARNING, FIXED GENERATOR COST NOT IMPLEMENTED YET\n')
     end        
 end
@@ -93,7 +108,7 @@ s_max_mode = "fixed" + strings(height(mpc.gen), 1); % By default all generators 
 d_mw_max = ones(height(mpc.gen), 1) * max(mpc.gen(:, PMAX))*10; % By default ramps are not constraints
 % pglib gen data structure:
 %	1bus	2Pg	3Qg	4Qmax	5Qmin	6Vg	7mBase	8status	9Pmax	10Pmin
-gen_data = [gen_i gen_bus p_mw_ini mpc.gen(:,[PG QG PMIN PMAX QMIN QMAX GEN_STATUS]) v_set c_2 c_1 price_mode controllable priority s_max_mode d_mw_max];
+gen_data = [gen_i gen_bus p_mw_ini mpc.gen(:,[PG QG PMIN PMAX QMIN QMAX GEN_STATUS]) v_set p_c2 p_c1 q_c2 q_c1 price_mode controllable priority s_max_mode d_mw_max];
 
 %% Loads data creation
 load_headers = {'index', 'bus', 'load_type', 'is_active', 'controllable', 'priority', 'p_mw', 'q_mvar', 's_mode', 'p_mw_max', 'p_mw_min', 'q_mvar_max', 'q_mvar_min', 'flex_price_down', 'flex_price_up', 'flex_price_mode'};
@@ -164,6 +179,6 @@ else
     fprintf('EXCEL NOT CREATED\n')
 end
 
-
+end
 
 
